@@ -1,0 +1,48 @@
+name: Build Release APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+        cache: 'gradle'
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+
+    - uses: gradle/actions/setup-gradle@v3
+
+    # Gradle signs the release itself when keystore.properties exists (see app/build.gradle.kts),
+    # so the key never passes through a third-party action.
+    - name: Restore signing key
+      env:
+        SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+        ALIAS: ${{ secrets.ALIAS }}
+        KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      run: |
+        test -n "$SIGNING_KEY" || { echo "::error::SIGNING_KEY secret is not set"; exit 1; }
+        echo "$SIGNING_KEY" | base64 -d > "$RUNNER_TEMP/release.jks"
+        printf 'storeFile=%s\nkeyAlias=%s\nstorePassword=%s\nkeyPassword=%s\n' \
+          "$RUNNER_TEMP/release.jks" "$ALIAS" "$KEY_STORE_PASSWORD" "$KEY_PASSWORD" > keystore.properties
+
+    - run: chmod +x gradlew && ./gradlew assembleGenericRelease
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: signed-apks
+        path: app/build/outputs/apk/generic/release/*.apk
+        if-no-files-found: error
+        retention-days: 20
